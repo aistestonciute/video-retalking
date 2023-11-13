@@ -16,23 +16,19 @@ class BaseModel:
         self.gpu_ids = self.opt.gpu_ids
         self.device = torch.device('cuda:%d' % self.gpu_ids[0] if self.gpu_ids else 'cpu')
         self.is_train = self.opt.mode == "train"
-        # inherit to define network model 
         self.models_name = []
         
     def setup(self):
-        # print("%s with Model [%s]" % (self.opt.mode.capitalize(), self.name))
         if self.is_train:
             self.set_train()
-            # define loss function
-            self.criterionGAN = model_utils.GANLoss(gan_type=self.opt.gan_type).to(self.device)
-            self.criterionL1 = torch.nn.L1Loss().to(self.device)
-            self.criterionMSE = torch.nn.MSELoss().to(self.device)
-            self.criterionTV = model_utils.TVLoss().to(self.device)
-            torch.nn.DataParallel(self.criterionGAN, self.gpu_ids)
-            torch.nn.DataParallel(self.criterionL1, self.gpu_ids)
-            torch.nn.DataParallel(self.criterionMSE, self.gpu_ids)
-            torch.nn.DataParallel(self.criterionTV, self.gpu_ids)
-            # inherit to set up train/val/test status
+            self.criterion_gan = model_utils.GANLoss(gan_type=self.opt.gan_type).to(self.device)
+            self.criterion_l1 = torch.nn.L1Loss().to(self.device)
+            self.criterion_mse = torch.nn.MSELoss().to(self.device)
+            self.criterion_tv = model_utils.TVLoss().to(self.device)
+            torch.nn.DataParallel(self.criterion_gan, self.gpu_ids)
+            torch.nn.DataParallel(self.criterion_l1, self.gpu_ids)
+            torch.nn.DataParallel(self.criterion_mse, self.gpu_ids)
+            torch.nn.DataParallel(self.criterion_tv, self.gpu_ids)
             self.losses_name = []
             self.optims = []
             self.schedulers = []
@@ -44,7 +40,8 @@ class BaseModel:
         for name in self.models_name:
             if isinstance(name, str):
                 net = getattr(self, 'net_' + name)
-                if True:
+                check_value = True
+                if (check_value == True):
                     net.eval()
                     print("Set net_%s to EVAL." % name)
                 else:
@@ -79,17 +76,18 @@ class BaseModel:
         for name in losses_name:
             if isinstance(name, str):
                 cur_loss = float(getattr(self, 'loss_' + name))
-                # cur_loss_lambda = 1. if len(losses_name) == 1 else float(getattr(self.opt, 'lambda_' + name))
-                # errors_ret[name] = cur_loss * cur_loss_lambda
                 errors_ret[name] = cur_loss
         return errors_ret
 
+    #feed_batch method is used in other file
     def feed_batch(self, batch):
         pass 
-
+    
+    #forward method is used in other file
     def forward(self):
         pass
-
+    
+    #optimize_paras method is used in other file
     def optimize_paras(self):
         pass
 
@@ -114,14 +112,10 @@ class BaseModel:
                     torch.save(net.cpu().state_dict(), save_path)
 
     def load_ckpt(self, epoch, models_name):
-        # print(models_name)
+        prefix = '%s_net_%s.pth'
         for name in models_name:
             if isinstance(name, str):
-                load_filename = '%s_net_%s.pth' % (epoch, name)
-                # load_path = os.path.join(self.opt.ckpt_dir, load_filename)
-                # assert os.path.isfile(load_path), "File '%s' does not exist." % load_path
-                
-                # pretrained_state_dict = torch.load(load_path, map_location=str(self.device))
+                load_filename = prefix % (epoch, name)
                 pretrained_state_dict = torch.load('checkpoints/30_net_gen.pth', map_location=str('cuda:0'))
                 if hasattr(pretrained_state_dict, '_metadata'):
                     del pretrained_state_dict._metadata
@@ -129,30 +123,23 @@ class BaseModel:
                 net = getattr(self, 'net_' + name)
                 if isinstance(net, torch.nn.DataParallel):
                     net = net.module
-                # load only existing keys
                 pretrained_dict = {k: v for k, v in pretrained_state_dict.items() if k in net.state_dict()}
-                # for k, v in pretrained_state_dict.items():
-                #     print(k)
-                # assert False
                 net.load_state_dict(pretrained_dict)
                 print("[Info] Successfully load trained weights for net_%s." % name)
 
     def clean_ckpt(self, epoch, models_name):
+        prefix = '%s_net_%s.pth'
         for name in models_name:
             if isinstance(name, str):
-                load_filename = '%s_net_%s.pth' % (epoch, name)
+                load_filename = prefix % (epoch, name)
                 load_path = os.path.join(self.opt.ckpt_dir, load_filename)
                 if os.path.isfile(load_path):
                     os.remove(load_path)
 
     def gradient_penalty(self, input_img, generate_img):
-        # interpolate sample
         alpha = torch.rand(input_img.size(0), 1, 1, 1).to(self.device)
         inter_img = (alpha * input_img.data + (1 - alpha) * generate_img.data).requires_grad_(True)
         inter_img_prob, _ = self.net_dis(inter_img)
-
-        # computer gradient penalty: x: inter_img, y: inter_img_prob
-        # (L2_norm(dy/dx) - 1)**2
         dydx = torch.autograd.grad(outputs=inter_img_prob,
                                    inputs=inter_img,
                                    grad_outputs=torch.ones(inter_img_prob.size()).to(self.device),
@@ -162,6 +149,3 @@ class BaseModel:
         dydx = dydx.view(dydx.size(0), -1)
         dydx_l2norm = torch.sqrt(torch.sum(dydx ** 2, dim=1))
         return torch.mean((dydx_l2norm - 1) ** 2) 
-
-
-
